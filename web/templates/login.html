@@ -1,0 +1,12 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"/><title>Login</title></head>
+<body>
+  <h1>Admin login</h1>
+  <form method="post" action="/login">
+    <label>Пароль: <input name="password" type="password" /></label>
+    <button type="submit">Войти</button>
+  </form>
+  {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
+</body>
+</html>
