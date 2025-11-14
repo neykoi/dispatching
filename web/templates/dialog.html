@@ -1,27 +1,375 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <title>Диалог {{user_id}}</title>
+<meta charset="utf-8" />
+<title>Чат {{ user_id }}</title>
+<style>
+body {
+  font-family: system-ui, sans-serif;
+  background:#f7f7f7;
+  margin:0; padding:0;
+}
+.chat {
+  max-width:900px; margin:24px auto;
+  background:#fff; border-radius:10px; padding:12px;
+  box-shadow:0 2px 10px rgba(0,0,0,0.06);
+}
+.topbar {
+  display:flex; justify-content:space-between;
+  align-items:center; gap:12px; margin-bottom:8px;
+}
+.topbar-left { display:flex; align-items:center; gap:10px; }
+.back-btn {
+  background:transparent; border:none; font-size:18px;
+  cursor:pointer; color:#333; padding:6px;
+}
+.title { font-size:18px; margin:0; font-weight:600; }
+.clear-btn {
+  background:#f44336; color:white; border:none;
+  padding:6px 12px; border-radius:6px; cursor:pointer;
+}
+.status {
+  font-size:13px; color:#666; margin-bottom:8px;
+}
+.messages {
+  height:62vh; min-height:320px;
+  overflow:auto; border:1px solid #eee; border-radius:8px;
+  padding:12px; display:flex; flex-direction:column;
+  gap:8px; scroll-behavior:smooth; background:#fafafa;
+}
+.msg {
+  display:inline-block; max-width:78%;
+  border-radius:12px; padding:10px 14px; position:relative;
+  word-wrap:break-word; box-shadow:0 1px 0 rgba(0,0,0,0.02);
+  animation:fadeIn .12s ease;
+}
+.msg.user { align-self:flex-start; background:#eef6ff; color:#0b1b2b; }
+.msg.admin { align-self:flex-end; background:#daf7dc; color:#082207; margin-left:auto; }
+.msg.deleted {
+  opacity: 0.4;
+  background: #f2f2f2 !important;
+  position: relative;
+}
+.msg .meta {
+  font-size: 11px;
+  color: #666;
+  margin-top: 6px;
+  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.msg .status-tag {
+  font-size: 12px;
+}
+.msg .delete-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #aaa;
+  opacity: 0.7;
+  display: none;
+}
+.msg .delete-btn:hover { opacity:1; transform:scale(1.1); }
+.msg:hover .delete-btn {
+  display: inline-block;
+}
+.controls {
+  display:flex; gap:10px; margin-top:12px;
+  background:#fff; padding:10px; border-radius:8px;
+}
+.controls textarea {
+  flex:1; height:64px; padding:8px; border-radius:8px;
+  resize:none; border:1px solid #ddd;
+}
+.controls button {
+  padding:8px 16px; background:#4caf50; color:white;
+  border:none; border-radius:8px; cursor:pointer;
+}
+.date-sep {
+  text-align:center; color:#888; font-size:12px; margin:6px 0;
+}
+@keyframes fadeIn { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} }
+@keyframes fadeInScale { from { opacity:0; transform:scale(0.98);} to { opacity:1; transform:scale(1);} }
+.msg.new { animation: fadeInScale 0.25s ease; }
+</style>
 </head>
 <body>
-  <h2>Диалог с {{user_id}}</h2>
-  <form method="post" action="/delete_user">
-    <input type="hidden" name="user_id" value="{{user_id}}" />
-    <button type="submit">🗑 Удалить всю историю</button>
-  </form>
-  <ul>
-  {% for m in messages %}
-    <li>
-      <b>{{m.username}}</b>: {{m.text}}
-      <form method="post" action="/delete_msg" style="display:inline;">
-        <input type="hidden" name="user_id" value="{{user_id}}" />
-        <input type="hidden" name="msg_id" value="{{m.id}}" />
-        <button type="submit">Удалить</button>
-      </form>
-    </li>
-  {% endfor %}
-  </ul>
-  <a href="/">⬅ Назад</a>
+<div class="chat">
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="back-btn" id="backBtn" title="Назад">⬅</button>
+      <h2 class="title" id="chatTitle">
+        {% if username %}@{{ username }}{% else %}@{{ user_id }}{% endif %}
+      </h2>
+    </div>
+    <div>
+      <button id="clearChat" class="clear-btn">🗑 Очистить чат</button>
+    </div>
+  </div>
+
+  <div id="status" class="status">Подключение...</div>
+  <div class="messages" id="messages"></div>
+
+  <div class="controls">
+    <input type="file" id="fileInput" style="display:none" multiple>
+    <button id="attachBtn" title="Прикрепить файл">📎</button>
+    <textarea id="input" placeholder="Напишите сообщение... (Ctrl+Enter — отправить)"></textarea>
+    <button id="send">Отправить</button>
+  </div>
+
+</div>
+
 </body>
 </html>
+<script>
+    const userId = {{ user_id }};
+    let messages = {{ messages | tojson }};
+    const messagesDiv = document.getElementById('messages');
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const clearBtn = document.getElementById('clearChat');
+    const status = document.getElementById('status');
+    const backBtn = document.getElementById('backBtn');
+
+    let ws, reconnectTimer, pingInterval;
+    const WS_PATH = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/" + userId;
+    window._chatWs = null;
+
+    // ====== Helpers ======
+    function escapeHtml(s){ return s ? String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;') : ''; }
+    function formatTime(iso){ try { return new Date(iso).toLocaleString(); } catch(e){ return iso; } }
+    async function scrollBottom() {
+      await new Promise(r => requestAnimationFrame(r));   // дождаться рендера
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function getStatusIcon(status) {
+      switch(status) {
+        case "sent": return "🕐";
+        case "delivered": return "✓";
+        case "read": return "✅";
+        case "deleted": return "🗑️";
+        default: return "";
+      }
+    }
+
+    // ====== Rendering ======
+    function renderAll() {
+      messagesDiv.innerHTML = '';
+      messages.sort((a,b)=> new Date(a.created_at) - new Date(b.created_at));
+      for (const m of messages) renderOne(m);
+      requestAnimationFrame(() => scrollBottom());
+
+    }
+
+    function renderOne(m) {
+      const el = document.createElement('div');
+      const isDeleted = m.status === "deleted";
+      el.className = 'msg ' + (m.username === 'admin' ? 'admin' : 'user') + (isDeleted ? ' deleted' : '');
+      el.dataset.id = m.id;
+
+      let content = escapeHtml(m.text || "");
+
+    // Медиа-файлы
+    let mediaHtml = "";
+    if (m.file_id) {
+        const url = `/media_proxy/${encodeURIComponent(m.file_id)}`;
+
+        if (m.media_type === "photo") {
+            mediaHtml = `<img src="${url}" class="media-img">`;
+        } else if (m.media_type === "video") {
+            mediaHtml = `<video controls src="${url}" class="media-video"></video>`;
+        } else if (m.media_type === "document") {
+            mediaHtml = `<a href="${url}" target="_blank">📄 Скачать документ</a>`;
+        } else if (m.media_type === "voice") {
+            mediaHtml = `<audio controls src="${url}" class="media-audio"></audio>`;
+        }
+    }
+
+
+
+
+      // Формирование карточки
+    el.innerHTML = `
+        ${mediaHtml}
+        <div class="text">${content}</div>
+        <div class="meta">${formatTime(m.created_at)} <span class="status-tag">${getStatusIcon(m.status)}</span></div>
+        <div class="delete-btn" title="Удалить">×</div>
+    `;
+
+
+      // Обработка удаления
+      const del = el.querySelector('.delete-btn');
+      del.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (!confirm('Удалить это сообщение у пользователя?')) return;
+        await deleteMessage(m.id);
+      });
+      el.addEventListener('contextmenu', async (ev) => {
+        ev.preventDefault();
+        if (!confirm('Удалить это сообщение у пользователя?')) return;
+        await deleteMessage(m.id);
+      });
+
+    messagesDiv.appendChild(el);
+    requestAnimationFrame(() => scrollBottom());
+    }
+
+    // ====== WebSocket ======
+    function connectWS() {
+      status.textContent = 'Подключение...';
+      ws = new WebSocket(WS_PATH);
+      window._chatWs = ws;
+
+      ws.onopen = () => {
+        status.textContent = 'Онлайн';
+        ws.send(JSON.stringify({action:'ping'}));
+        input.focus();
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = setInterval(()=> {
+          if (ws && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({action:'ping'}));
+        }, 25000);
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.action === 'message') {
+            const msg = {
+              id: data.id ?? Date.now(),
+              username: data.from === 'admin' ? (data.username || 'admin') : (data.username || 'user'),
+              text: data.text || '',
+              created_at: data.created_at || new Date().toISOString(),
+              status: data.status || 'delivered',
+              media_type: data.media_type || null,
+              file_id: data.file_id || null
+            };
+            messages.push(msg);
+            renderOne(msg);
+          } else if (data.action === 'status_update') {
+            const msg = messages.find(m => m.id === data.msg_id);
+            if (msg) {
+              msg.status = data.status;
+              renderAll();
+            }
+          } else if (data.action === 'cleared') {
+            messages = [];
+            renderAll();
+          }
+        } catch (e) { console.error('WS parse error', e, ev.data); }
+      };
+
+      ws.onclose = () => {
+        status.textContent = 'Оффлайн — переподключение...';
+        if (pingInterval) clearInterval(pingInterval);
+        reconnectTimer = setTimeout(connectWS, 1500);
+      };
+    }
+
+    // ====== Send ======
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({action:'send', text}));
+      input.value = '';
+    }
+    sendBtn.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', (e)=>{ if(e.ctrlKey && e.key==='Enter') sendMessage(); });
+
+    // ====== Delete ======
+    async function deleteMessage(msgId) {
+      const fd = new FormData();
+      fd.append('user_id', userId);
+      fd.append('msg_id', msgId);
+      const res = await fetch('/delete_msg', {method:'POST', body: fd});
+      const data = await res.json();
+      if (data.ok) {
+        const msg = messages.find(m => m.id == msgId);
+        if (msg) msg.status = "deleted";
+        renderAll();
+      }
+    }
+
+    // ====== Attach files ======
+    const attachBtn = document.getElementById('attachBtn');
+    const fileInput = document.getElementById('fileInput');
+
+    attachBtn.addEventListener('click', ()=> fileInput.click());
+
+    fileInput.addEventListener('change', async ()=> {
+      if (!fileInput.files.length) return;
+      const fd = new FormData();
+      fd.append('user_id', userId);
+      for (const f of fileInput.files) fd.append('files', f);
+
+      const res = await fetch('/upload_admin_file', {method:'POST', body: fd});
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.files)) {
+        for (const file of data.files) {
+          ws.send(JSON.stringify({
+            action: 'send',
+            text: file.caption || '',
+            media_type: file.type,
+            file_id: file.id
+          }));
+        }
+      }
+      fileInput.value = '';
+    });
+
+    fileInput.addEventListener('change', async ()=> {
+      if (!fileInput.files.length) return;
+      for (const f of fileInput.files) {
+        const preview = document.createElement('div');
+        preview.className = 'msg admin new uploading';
+        let previewContent = '';
+        if (f.type.startsWith('image/')) {
+          const url = URL.createObjectURL(f);
+          previewContent = `<img src="${url}" style="max-width:200px;border-radius:8px;"><div class="meta">Загрузка...</div>`;
+        } else {
+          previewContent = `<div>${f.name}</div><div class="meta">Загрузка...</div>`;
+        }
+        preview.innerHTML = previewContent;
+        messagesDiv.appendChild(preview);
+        requestAnimationFrame(() => scrollBottom());
+
+        const fd = new FormData();
+        fd.append('user_id', userId);
+        fd.append('files', f);
+        const res = await fetch('/upload_admin_file', {method:'POST', body: fd});
+        const data = await res.json();
+
+        if (data.ok && data.files.length) {
+          const file = data.files[0];
+          ws.send(JSON.stringify({
+            action: 'send',
+            text: '',
+            media_type: file.type,
+            file_id: file.id
+          }));
+          preview.querySelector('.meta').innerHTML = "✅ Отправлено";
+        } else {
+          preview.querySelector('.meta').innerHTML = "❌ Ошибка загрузки";
+        }
+      }
+      fileInput.value = '';
+    });
+
+    // ====== Clear all ======
+    clearBtn.addEventListener('click', ()=> {
+      if (!confirm('Удалить все сообщения у пользователя?')) return;
+      ws.send(JSON.stringify({action:'clear_history'}));
+    });
+
+    // ====== Init ======
+    backBtn.addEventListener('click', ()=> window.location.href='/');
+    connectWS();
+    renderAll();
+    requestAnimationFrame(() => scrollBottom());
+
+</script>

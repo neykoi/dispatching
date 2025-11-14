@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Диалог {{user_id}}</title>
+</head>
+<body>
+  <h2>Диалог с {{user_id}}</h2>
+  <form method="post" action="/delete_user">
+    <input type="hidden" name="user_id" value="{{user_id}}" />
+    <button type="submit">🗑 Удалить всю историю</button>
+  </form>
+  <ul>
+  {% for m in messages %}
+    <li>
+      <b>{{m.username}}</b>: {{m.text}}
+      <form method="post" action="/delete_msg" style="display:inline;">
+        <input type="hidden" name="user_id" value="{{user_id}}" />
+        <input type="hidden" name="msg_id" value="{{m.id}}" />
+        <button type="submit">Удалить</button>
+      </form>
+    </li>
+  {% endfor %}
+  </ul>
+  <a href="/">⬅ Назад</a>
+</body>
+</html>

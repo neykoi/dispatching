@@ -1,15 +1,12 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>Admin Panel</title>
-</head>
+<head><meta charset="utf-8"/><title>Admin — Chats</title></head>
 <body>
-  <h1>Пользователи</h1>
-  <ul>
-  {% for uid, username in users %}
-    <li><a href="/dialog/{{uid}}">{{username or uid}}</a></li>
-  {% endfor %}
-  </ul>
+<h1>Список чатов</h1>
+<ul>
+{% for uid, username in users %}
+  <li><a href="/dialog/{{uid}}">{{username or uid}}</a></li>
+{% endfor %}
+</ul>
 </body>
 </html>

@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 class Config(BaseSettings):
     BOT_TOKEN: str
+    ADMIN_NAME: str = "admin"
     ADMIN_PASSWORD: str = "admin"
     DB_URL: str = "sqlite+aiosqlite:///./bot.db"
 
