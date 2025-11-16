@@ -1,0 +1,264 @@
+/* ========= GLOBAL ========= */
+body {
+    font-family: system-ui, sans-serif;
+    background: #f5f5f5;
+    margin: 0;
+    padding: 0;
+}
+
+.chat {
+  width: 100%;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 0;
+  box-shadow: none;
+
+}
+
+/* ========= TOPBAR ========= */
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.back-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    padding: 4px 6px;
+}
+
+.title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.clear-btn {
+    padding: 6px 12px;
+    background: #e74c3c;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+/* ========= STATUS ========= */
+.status {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+/* ========= MESSAGES LIST ========= */
+.messages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: #fafafa;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ========= ONE MESSAGE ========= */
+.msg {
+    display: inline-block;
+    width: fit-content;
+    max-width: 30%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+    animation: fadeIn .12s ease;
+    position: relative;
+}
+
+.msg.user {
+    align-self: flex-start;
+    background: #e8f1ff;
+    color: #0b1b2b;
+}
+
+.msg.admin {
+    align-self: flex-end;
+    background: #daf7dc;
+    color: #082207;
+}
+
+.msg.deleted {
+    opacity: 0.45;
+    background: #ececec !important;
+}
+
+/* ========= MEDIA INSIDE MESSAGE ========= */
+.media-img,
+.media-video {
+    max-width: 100%;
+    max-height: 800px;
+    border-radius: 10px;
+    object-fit: contain;
+    display: block;
+}
+
+.media-audio {
+    width: 260px;
+    margin-top: 4px;
+}
+
+.msg .text {
+    margin-top: 6px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.msg .meta {
+    font-size: 11px;
+    color: #666;
+    margin-top: 4px;
+    text-align: right;
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.delete-btn {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    cursor: pointer;
+    color: #666;
+    display: none;
+    font-size: 14px;
+}
+
+.msg:hover .delete-btn {
+    display: block;
+}
+
+/* ========= PREVIEW (before sending) ========= */
+.preview-area {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.preview-item {
+    position: relative;
+    width: 130px;
+    height: 130px;
+    border-radius: 10px;
+    background: #eaeaea;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.preview-item img,
+.preview-item video {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: cover;
+}
+
+.preview-filename {
+    padding: 6px;
+    font-size: 13px;
+    text-align: center;
+}
+
+.preview-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    width: 22px;
+    height: 22px;
+    border-radius: 100px;
+    font-size: 16px;
+    line-height: 22px;
+    text-align: center;
+    cursor: pointer;
+}
+
+/* ========= UPLOAD PROGRESS ========= */
+.preview-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 5px;
+    background: #4caf50;
+    width: 0%;
+    transition: width .2s;
+}
+
+/* ========= DRAG & DROP ========= */
+.messages.drop-active {
+    border: 2px dashed #4a90e2;
+    background: #eef6ff;
+}
+
+/* ========= INPUT CONTROLS ========= */
+.controls {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  background: #fff;
+  border-top: 1px solid #e0e0e0;
+}
+
+
+#input {
+    flex: 1;
+    height: 68px;
+    resize: none;
+    padding: 8px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    outline: none;
+}
+
+#send {
+    padding: 8px 18px;
+    background: #4caf50;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+#attachBtn {
+    font-size: 20px;
+    background: #eee;
+    border-radius: 10px;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+/* ========= ANIMATIONS ========= */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}

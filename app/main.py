@@ -9,10 +9,18 @@ from app.routers import user
 from web import admin_panel
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
+
+app.mount(
+    "/static",
+    StaticFiles(directory="web/static"),
+    name="static"
+)
+
 app.include_router(admin_panel.router)  # 👈 подключаем админскую панель
 
 

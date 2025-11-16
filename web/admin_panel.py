@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import APIRouter, Request, WebSocket, UploadFile, File, Form, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, Response
 from jinja2 import Environment, FileSystemLoader
 from app.storage.repo import get_all_users, save_message, get_user_messages, update_message_status, get_message_by_id
@@ -10,6 +10,7 @@ from typing import List
 from app.deps import SessionLocal, bot
 from app.notifications import register_ws, unregister_ws, send_to_user_ws
 from datetime import datetime
+from aiogram.types import FSInputFile
 
 env = Environment(loader=FileSystemLoader("web/templates"))
 router = APIRouter()
@@ -191,8 +192,13 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
             action = data.get("action")
 
             if action == "send":
-                text = data.get("text", "").strip()
-                if not text:
+                raw_text = data.get("text", "") or ""
+                text = raw_text.strip()
+
+                media_type = data.get("media_type")
+                file_id = data.get("file_id")
+
+                if not text and not file_id:
                     continue
 
                 async with SessionLocal() as session:
@@ -202,10 +208,12 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
                         username=config.ADMIN_NAME or "admin",
                         text=text,
                         tg_message_id=0,
+                        media_type=media_type if file_id else None,
+                        file_id=file_id if file_id else None,
                         status="sent",
                     )
 
-                await send_to_user_ws(user_id, {
+                payload = {
                     "action": "message",
                     "from": "admin",
                     "username": config.ADMIN_NAME or "admin",
@@ -213,19 +221,56 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
                     "created_at": datetime.utcnow().isoformat(),
                     "id": msg.id,
                     "status": "sent",
-                })
+                }
+                if file_id and media_type:
+                    payload.update({"media_type": media_type, "file_id": file_id})
+
+                await send_to_user_ws(user_id, payload)
 
                 try:
-                    sent = await bot.send_message(int(user_id), text)
-                    tg_id = getattr(sent, "message_id", 0)
+                    if file_id and media_type:
+                        caption = text or None
+                        send_kwargs = {"caption": caption} if caption else {}
+                        if media_type == "photo":
+                            sent = await bot.send_photo(int(user_id), file_id, **send_kwargs)
+                            new_file_id = sent.photo[-1].file_id if sent.photo else file_id
+                        elif media_type == "video":
+                            sent = await bot.send_video(int(user_id), file_id, **send_kwargs)
+                            new_file_id = sent.video.file_id if getattr(sent, "video", None) else file_id
+                        elif media_type == "voice":
+                            sent = await bot.send_voice(int(user_id), file_id, **send_kwargs)
+                            voice_obj = getattr(sent, "voice", None)
+                            new_file_id = voice_obj.file_id if voice_obj else file_id
+                        elif media_type == "audio":
+                            sent = await bot.send_audio(int(user_id), file_id, **send_kwargs)
+                            audio_obj = getattr(sent, "audio", None)
+                            new_file_id = audio_obj.file_id if audio_obj else file_id
+                        else:
+                            sent = await bot.send_document(int(user_id), file_id, **send_kwargs)
+                            doc_obj = getattr(sent, "document", None)
+                            new_file_id = doc_obj.file_id if doc_obj else file_id
 
-                    async with SessionLocal() as session:
-                        db_msg = await get_message_by_id(session, msg.id)
-                        if db_msg:
-                            db_msg.tg_message_id = tg_id
-                            await session.commit()
+                        tg_id = getattr(sent, "message_id", 0)
+
+                        async with SessionLocal() as session:
+                            db_msg = await get_message_by_id(session, msg.id)
+                            if db_msg:
+                                db_msg.tg_message_id = tg_id
+                                db_msg.media_type = media_type
+                                db_msg.file_id = new_file_id
+                                await session.commit()
+                    else:
+                        sent = await bot.send_message(int(user_id), text)
+                        tg_id = getattr(sent, "message_id", 0)
+
+                        async with SessionLocal() as session:
+                            db_msg = await get_message_by_id(session, msg.id)
+                            if db_msg:
+                                db_msg.tg_message_id = tg_id
+                                await session.commit()
 
                     await update_status(msg.id, "delivered")
+
                 except Exception as e:
                     print(f"[ERROR] Telegram send: {e}")
                     await update_status(msg.id, "failed")
@@ -234,48 +279,31 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
                 try:
                     async with SessionLocal() as session:
                         msgs = await get_user_messages(session, user_id)
+
                         for msg in msgs:
                             try:
                                 if msg.tg_message_id:
                                     await bot.delete_message(user_id, msg.tg_message_id)
                             except Exception as e:
                                 print(f"[clear_history] Telegram delete failed: {e}")
+
                             msg.status = "deleted"
 
                         await session.commit()
-                        for msg in msgs:
-                            await send_to_user_ws(user_id, {
-                                "action": "status_update",
-                                "msg_id": msg.id,
-                                "status": "deleted",
-                            })
-                except Exception as e:
-                    print(f"[ERROR clear_history]: {e}")
 
-            elif action == "ping":
-                await websocket.send_json({"action": "pong"})
+                    # отправляем клиенту обновления статусов
+                    for msg in msgs:
+                        await send_to_user_ws(user_id, {
+                            "action": "status_update",
+                            "msg_id": msg.id,
+                            "status": "deleted",
+                        })
+
+                except Exception as e:
+                    print(f"[clear_history] error: {e}")
 
     except WebSocketDisconnect:
         await unregister_ws(user_id)
-
-
-# ------------------ Push user messages (HTTP hook, если нужно) ------------------
-
-@router.post("/_push_user_message")
-async def push_user_message(
-    user_id: int = Form(...),
-    username: str = Form(...),
-    text: str = Form(...),
-    created_at: str = Form(None),
-):
-    await send_to_user_ws(int(user_id), {
-        "action": "message",
-        "from": "user",
-        "text": text,
-        "username": username,
-        "created_at": created_at or datetime.utcnow().isoformat(),
-    })
-    return {"ok": True}
 
 
 # ------------------ Upload admin files ------------------
@@ -299,22 +327,29 @@ async def upload_admin_file(
         elif mime and mime.startswith("video/"):
             media_type = "video"
         elif mime and mime.startswith("audio/"):
-            media_type = "voice"
+            if "ogg" in mime:
+                media_type = "voice"
+            else:
+                media_type = "audio"
         else:
             media_type = "document"
 
+        input_file = FSInputFile(file_path)
         # отправка пользователю
         if media_type == "photo":
-            sent = await bot.send_photo(user_id, open(file_path, "rb"))
+            sent = await bot.send_photo(user_id, input_file)
             file_id = sent.photo[-1].file_id
         elif media_type == "video":
-            sent = await bot.send_video(user_id, open(file_path, "rb"))
+            sent = await bot.send_video(user_id, input_file)
             file_id = sent.video.file_id
         elif media_type == "voice":
-            sent = await bot.send_voice(user_id, open(file_path, "rb"))
+            sent = await bot.send_voice(user_id, input_file)
             file_id = sent.voice.file_id
+        elif media_type == "audio":
+            sent = await bot.send_audio(user_id, input_file)
+            file_id = sent.audio.file_id
         else:
-            sent = await bot.send_document(user_id, open(file_path, "rb"))
+            sent = await bot.send_document(user_id, input_file)
             file_id = sent.document.file_id
 
         tg_id = sent.message_id
@@ -348,4 +383,10 @@ async def upload_admin_file(
             "type": media_type,
         })
 
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
     return {"ok": True, "files": saved_files}
+
