@@ -191,18 +191,11 @@ function isAlbumFile(file) {
   return !!file && (file.type.startsWith('image/') || file.type.startsWith('video/'));
 }
 
-<<<<<<< ours
-function addPreview(files) {
-  for (const f of files) {
-    if (!f) continue;
-    const id = crypto.randomUUID();
-=======
 function addPreview(fileList) {
   const files = normalizeFiles(fileList);
   for (const f of files) {
     if (!f) continue;
     const id = makePreviewId();
->>>>>>> theirs
     const url = URL.createObjectURL(f);
     const isMedia = f.type.startsWith("image/") || f.type.startsWith("video/");
 
@@ -228,8 +221,6 @@ function addPreview(fileList) {
   }
 }
 
-<<<<<<< ours
-=======
 function normalizeFiles(list) {
   if (!list) return [];
   if (Array.isArray(list)) return list.filter(Boolean);
@@ -261,8 +252,6 @@ function normalizeFiles(list) {
   }
   return out;
 }
-
->>>>>>> theirs
 function setPreviewStatus(item, text, state) {
   const progressEl = item.el.querySelector('.preview-progress');
   progressEl.textContent = text;
@@ -341,34 +330,29 @@ async function uploadBatch(items) {
           setTimeout(() => {
             if (item.url) URL.revokeObjectURL(item.url);
             item.el.remove();
-<<<<<<< ours
-          }, 500);
-        });
-=======
-            refreshPreviewArea();
-          }, 500);
-        });
+          refreshPreviewArea();
+        }, 500);
+      });
 
-        try {
-          data.files.forEach((meta, idx) => {
-            const message = {
-              id: meta.msg_id ?? Date.now() + idx,
-              username: ADMIN_NAME,
-              text: '',
-              created_at: meta.created_at || new Date().toISOString(),
-              status: meta.status || 'delivered',
-              media_type: meta.type || null,
-              file_id: meta.id || null,
-            };
-            if (message.file_id) {
-              messages.push(message);
-              renderOne(message);
-            }
-          });
-        } catch (err) {
-          console.error('Cannot render uploaded files', err);
-        }
->>>>>>> theirs
+      try {
+        data.files.forEach((meta, idx) => {
+          const message = {
+            id: meta.msg_id ?? Date.now() + idx,
+            username: ADMIN_NAME,
+            text: '',
+            created_at: meta.created_at || new Date().toISOString(),
+            status: meta.status || 'delivered',
+            media_type: meta.type || null,
+            file_id: meta.id || null,
+          };
+          if (message.file_id) {
+            messages.push(message);
+            renderOne(message);
+          }
+        });
+      } catch (err) {
+        console.error('Cannot render uploaded files', err);
+      }
         resolve(true);
       } else {
         items.forEach(item => setPreviewStatus(item, "Ошибка", "error"));
@@ -409,21 +393,11 @@ async function sendMessage() {
     if (previewFiles.length === 0) {
       previewArea.innerHTML = '';
     }
-<<<<<<< ours
 
     // 2. Отправить текст
     if (text && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: "send", text }));
     }
-
-=======
-
-    // 2. Отправить текст
-    if (text && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ action: "send", text }));
-    }
-
->>>>>>> theirs
     input.value = "";
   } finally {
     sending = false;
@@ -487,9 +461,6 @@ document.addEventListener('drop', (e) => {
   clearDropZone();
   if (e.dataTransfer.files?.length) {
     addPreview(e.dataTransfer.files);
-<<<<<<< ours
-  }
-=======
   } else if (e.dataTransfer.items?.length) {
     addPreview(e.dataTransfer.items);
   }
@@ -502,7 +473,6 @@ document.addEventListener('paste', (e) => {
   if (!files.length) return;
   e.preventDefault();
   addPreview(files);
->>>>>>> theirs
 });
 
 // ---------------- Clear ------------------
