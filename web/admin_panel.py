@@ -358,7 +358,6 @@ async def upload_admin_file(
                 status="delivered",
             )
 
-<<<<<<< ours
         await send_to_user_ws(
             user_id,
             {
@@ -375,38 +374,6 @@ async def upload_admin_file(
         )
 
         saved_files.append({"id": file_id, "type": media_type})
-=======
-            created_at = (
-                msg.created_at.isoformat()
-                if getattr(msg, "created_at", None) and hasattr(msg.created_at, "isoformat")
-                else datetime.utcnow().isoformat()
-            )
-
-        payload = {
-            "action": "message",
-            "from": "admin",
-            "username": config.ADMIN_NAME or "admin",
-            "media_type": media_type,
-            "file_id": file_id,
-            "text": "",
-            "created_at": created_at,
-            "id": msg.id,
-            "status": "delivered",
-        }
-
-        await send_to_user_ws(user_id, payload)
-
-        saved_files.append(
-            {
-                "id": file_id,
-                "type": media_type,
-                "msg_id": msg.id,
-                "tg_message_id": tg_id,
-                "created_at": created_at,
-                "status": "delivered",
-            }
-        )
->>>>>>> theirs
 
     async def send_single(item):
         input_file = FSInputFile(item["path"])

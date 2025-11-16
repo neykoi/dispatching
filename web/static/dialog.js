@@ -26,13 +26,12 @@ window._chatWs = null;
 // ---------------- Helpers ------------------
 
 function escapeHtml(s) {
-  return s
-    ? String(s)
-        .replaceAll('&','&amp;')
-        .replaceAll('<','&lt;')
-        .replaceAll('>','&gt;')
-        .replaceAll('"','&quot;')
-    : '';
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function formatTime(iso) {
@@ -76,7 +75,7 @@ function renderOne(m) {
   el.className = 'msg ' + (isAdmin ? 'admin' : 'user') + (isDeleted ? ' deleted' : '');
   el.dataset.id = m.id;
 
-  let content = escapeHtml(m.text || "").replaceAll("\n", "<br>");
+  let content = escapeHtml(m.text || "").replace(/\n/g, "<br>");
 
   let mediaHtml = "";
   if (m.file_id) {
@@ -192,10 +191,18 @@ function isAlbumFile(file) {
   return !!file && (file.type.startsWith('image/') || file.type.startsWith('video/'));
 }
 
+<<<<<<< ours
 function addPreview(files) {
   for (const f of files) {
     if (!f) continue;
     const id = crypto.randomUUID();
+=======
+function addPreview(fileList) {
+  const files = normalizeFiles(fileList);
+  for (const f of files) {
+    if (!f) continue;
+    const id = makePreviewId();
+>>>>>>> theirs
     const url = URL.createObjectURL(f);
     const isMedia = f.type.startsWith("image/") || f.type.startsWith("video/");
 
@@ -213,6 +220,7 @@ function addPreview(files) {
       previewFiles = previewFiles.filter(x => x.id !== id);
       URL.revokeObjectURL(url);
       el.remove();
+      refreshPreviewArea();
     };
 
     previewFiles.push({ id, file: f, el, url });
@@ -220,6 +228,41 @@ function addPreview(files) {
   }
 }
 
+<<<<<<< ours
+=======
+function normalizeFiles(list) {
+  if (!list) return [];
+  if (Array.isArray(list)) return list.filter(Boolean);
+  if (typeof FileList !== 'undefined' && list instanceof FileList) {
+    return Array.from(list).filter(Boolean);
+  }
+  // DataTransferItemList or other iterable
+  const out = [];
+  if (typeof DataTransferItemList !== 'undefined' && list instanceof DataTransferItemList) {
+    for (const item of list) {
+      if (item && item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) out.push(file);
+      }
+    }
+    return out;
+  }
+  try {
+    for (const entry of list) {
+      if (!entry) continue;
+      if (typeof File !== 'undefined' && entry instanceof File) out.push(entry);
+      else if (entry.getAsFile) {
+        const file = entry.getAsFile();
+        if (file) out.push(file);
+      }
+    }
+  } catch (err) {
+    console.warn('Cannot normalize files', err);
+  }
+  return out;
+}
+
+>>>>>>> theirs
 function setPreviewStatus(item, text, state) {
   const progressEl = item.el.querySelector('.preview-progress');
   progressEl.textContent = text;
@@ -298,8 +341,34 @@ async function uploadBatch(items) {
           setTimeout(() => {
             if (item.url) URL.revokeObjectURL(item.url);
             item.el.remove();
+<<<<<<< ours
           }, 500);
         });
+=======
+            refreshPreviewArea();
+          }, 500);
+        });
+
+        try {
+          data.files.forEach((meta, idx) => {
+            const message = {
+              id: meta.msg_id ?? Date.now() + idx,
+              username: ADMIN_NAME,
+              text: '',
+              created_at: meta.created_at || new Date().toISOString(),
+              status: meta.status || 'delivered',
+              media_type: meta.type || null,
+              file_id: meta.id || null,
+            };
+            if (message.file_id) {
+              messages.push(message);
+              renderOne(message);
+            }
+          });
+        } catch (err) {
+          console.error('Cannot render uploaded files', err);
+        }
+>>>>>>> theirs
         resolve(true);
       } else {
         items.forEach(item => setPreviewStatus(item, "Ошибка", "error"));
@@ -340,12 +409,21 @@ async function sendMessage() {
     if (previewFiles.length === 0) {
       previewArea.innerHTML = '';
     }
+<<<<<<< ours
 
     // 2. Отправить текст
     if (text && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: "send", text }));
     }
 
+=======
+
+    // 2. Отправить текст
+    if (text && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: "send", text }));
+    }
+
+>>>>>>> theirs
     input.value = "";
   } finally {
     sending = false;
@@ -409,7 +487,22 @@ document.addEventListener('drop', (e) => {
   clearDropZone();
   if (e.dataTransfer.files?.length) {
     addPreview(e.dataTransfer.files);
+<<<<<<< ours
   }
+=======
+  } else if (e.dataTransfer.items?.length) {
+    addPreview(e.dataTransfer.items);
+  }
+});
+
+document.addEventListener('paste', (e) => {
+  const clipboard = e.clipboardData || window.clipboardData;
+  if (!clipboard) return;
+  const files = normalizeFiles(clipboard.items || clipboard.files);
+  if (!files.length) return;
+  e.preventDefault();
+  addPreview(files);
+>>>>>>> theirs
 });
 
 // ---------------- Clear ------------------
@@ -425,3 +518,16 @@ backBtn.addEventListener('click', ()=> window.location.href='/');
 connectWS();
 renderAll();
 scrollBottom();
+function makePreviewId() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return 'file-' + Date.now().toString(36) + '-' + Math.random().toString(16).slice(2);
+}
+
+function refreshPreviewArea() {
+  if (!previewArea.childElementCount) {
+    previewArea.innerHTML = '';
+  }
+}
+
