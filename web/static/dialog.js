@@ -1,5 +1,6 @@
 // userId, ADMIN_NAME, messages приходят из dialog.html
 
+const chatRoot = document.querySelector('.chat');
 const messagesDiv = document.getElementById('messages');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
@@ -10,8 +11,11 @@ const attachBtn = document.getElementById('attachBtn');
 const fileInput = document.getElementById('fileInput');
 const previewArea = document.getElementById('previewArea');
 
+const MAX_ALBUM_ITEMS = 10;
 let previewFiles = [];  // файлы, ожидающие отправки
 let ws, reconnectTimer, pingInterval;
+let sending = false;
+let dragDepth = 0;
 
 const WS_PATH =
   (location.protocol === "https:" ? "wss://" : "ws://") +
@@ -184,47 +188,100 @@ async function deleteMessage(msgId) {
 
 // ---------------- PREVIEW ------------------
 
+function isAlbumFile(file) {
+  return !!file && (file.type.startsWith('image/') || file.type.startsWith('video/'));
+}
+
 function addPreview(files) {
   for (const f of files) {
+    if (!f) continue;
     const id = crypto.randomUUID();
     const url = URL.createObjectURL(f);
-    const isImage = f.type.startsWith("image/");
+    const isMedia = f.type.startsWith("image/") || f.type.startsWith("video/");
 
     const el = document.createElement("div");
     el.className = "preview-item";
     el.dataset.id = id;
 
     el.innerHTML = `
-      ${isImage ? `<img src="${url}">` : `<div>${escapeHtml(f.name)}</div>`}
+      ${isMedia ? `<img src="${url}" alt="preview">` : `<div class="preview-filename">${escapeHtml(f.name || 'файл')}</div>`}
       <div class="preview-remove">×</div>
-      <div class="preview-progress">Готово</div>
+      <div class="preview-progress">Ожидание</div>
     `;
 
     el.querySelector(".preview-remove").onclick = () => {
       previewFiles = previewFiles.filter(x => x.id !== id);
+      URL.revokeObjectURL(url);
       el.remove();
     };
 
-    previewFiles.push({ id, file: f, el });
+    previewFiles.push({ id, file: f, el, url });
     previewArea.appendChild(el);
   }
 }
 
+function setPreviewStatus(item, text, state) {
+  const progressEl = item.el.querySelector('.preview-progress');
+  progressEl.textContent = text;
+  progressEl.classList.remove('error', 'done');
+  if (state === 'error') progressEl.classList.add('error');
+  else if (state === 'done') progressEl.classList.add('done');
+}
+
 // ---------------- Upload with progress ------------------
 
-async function uploadFile(item) {
+function splitUploadGroups(queue) {
+  const groups = [];
+  let albumBuffer = [];
+
+  const flushAlbum = () => {
+    if (albumBuffer.length > 1) {
+      groups.push([...albumBuffer]);
+    } else if (albumBuffer.length === 1) {
+      groups.push([albumBuffer[0]]);
+    }
+    albumBuffer = [];
+  };
+
+  for (const item of queue) {
+    if (isAlbumFile(item.file)) {
+      albumBuffer.push(item);
+      if (albumBuffer.length === MAX_ALBUM_ITEMS) {
+        groups.push([...albumBuffer]);
+        albumBuffer = [];
+      }
+    } else {
+      flushAlbum();
+      groups.push([item]);
+    }
+  }
+
+  flushAlbum();
+  return groups;
+}
+
+async function uploadBatch(items) {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     const fd = new FormData();
     fd.append("user_id", userId);
-    fd.append("files", item.file);
+    const isAlbum = items.length > 1 && items.every(it => isAlbumFile(it.file));
+    if (isAlbum) {
+      fd.append('album', '1');
+    }
 
-    const progressEl = item.el.querySelector(".preview-progress");
+    items.forEach(item => {
+      fd.append("files", item.file);
+      setPreviewStatus(item, '0%', null);
+    });
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
         const pct = Math.round((e.loaded / e.total) * 100);
-        progressEl.textContent = `${pct}%`;
+        items.forEach(item => {
+          const progressEl = item.el.querySelector('.preview-progress');
+          progressEl.textContent = `${pct}%`;
+        });
       }
     };
 
@@ -235,16 +292,23 @@ async function uploadFile(item) {
       } catch {}
 
       if (data.ok && data.files?.length) {
-        progressEl.textContent = "📤 Отправлено";
+        items.forEach(item => {
+          item.uploaded = true;
+          setPreviewStatus(item, "Отправлено", "done");
+          setTimeout(() => {
+            if (item.url) URL.revokeObjectURL(item.url);
+            item.el.remove();
+          }, 500);
+        });
         resolve(true);
       } else {
-        progressEl.textContent = "❌ Ошибка";
+        items.forEach(item => setPreviewStatus(item, "Ошибка", "error"));
         resolve(false);
       }
     };
 
     xhr.onerror = () => {
-      progressEl.textContent = "❌ Ошибка";
+      items.forEach(item => setPreviewStatus(item, "Ошибка", "error"));
       resolve(false);
     };
 
@@ -256,24 +320,37 @@ async function uploadFile(item) {
 // ---------------- SEND ------------------
 
 async function sendMessage() {
+  if (sending) return;
   const text = input.value.trim();
+  if (!text && previewFiles.length === 0) return;
 
-  // 1. Загрузить файлы
-  for (const item of previewFiles) {
-    await uploadFile(item);
-    await new Promise(r => setTimeout(r, 120));
+  sending = true;
+  sendBtn.disabled = true;
+
+  try {
+    // 1. Загрузить файлы
+    const queue = [...previewFiles];
+    const groups = splitUploadGroups(queue);
+    for (const group of groups) {
+      await uploadBatch(group);
+      await new Promise(r => setTimeout(r, 120));
+    }
+
+    previewFiles = previewFiles.filter(item => !item.uploaded && item.el.isConnected);
+    if (previewFiles.length === 0) {
+      previewArea.innerHTML = '';
+    }
+
+    // 2. Отправить текст
+    if (text && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: "send", text }));
+    }
+
+    input.value = "";
+  } finally {
+    sending = false;
+    sendBtn.disabled = false;
   }
-
-  // очистить превью
-  previewArea.innerHTML = "";
-  previewFiles = [];
-
-  // 2. Отправить текст
-  if (text && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ action: "send", text }));
-  }
-
-  input.value = "";
 }
 
 sendBtn.addEventListener('click', sendMessage);
@@ -292,21 +369,47 @@ fileInput.addEventListener('change', ()=> {
 
 // ---------------- Drag & Drop ------------------
 
-messagesDiv.addEventListener("dragover", e => {
-  e.preventDefault();
-  messagesDiv.classList.add("dragover");
+function allowFileDrop(e) {
+  if (!e.dataTransfer) return false;
+  return Array.from(e.dataTransfer.types || []).includes('Files');
+}
+
+function highlightDropZone() {
+  messagesDiv.classList.add('dragover');
+  chatRoot?.classList.add('dragover');
+}
+
+function clearDropZone() {
+  messagesDiv.classList.remove('dragover');
+  chatRoot?.classList.remove('dragover');
+}
+
+document.addEventListener('dragenter', (e) => {
+  if (!allowFileDrop(e)) return;
+  dragDepth += 1;
+  highlightDropZone();
 });
 
-messagesDiv.addEventListener("dragleave", () => {
-  messagesDiv.classList.remove("dragover");
+document.addEventListener('dragover', (e) => {
+  if (!allowFileDrop(e)) return;
+  e.preventDefault();
+  highlightDropZone();
 });
 
-messagesDiv.addEventListener("drop", e => {
-  e.preventDefault();
-  messagesDiv.classList.remove("dragover");
+document.addEventListener('dragleave', (e) => {
+  if (!allowFileDrop(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) clearDropZone();
+});
 
-  if (e.dataTransfer.files.length)
+document.addEventListener('drop', (e) => {
+  if (!allowFileDrop(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  clearDropZone();
+  if (e.dataTransfer.files?.length) {
     addPreview(e.dataTransfer.files);
+  }
 });
 
 // ---------------- Clear ------------------

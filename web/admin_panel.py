@@ -7,10 +7,11 @@ from app import config as app_config
 from app.auth import create_token, verify_token
 import json, os, asyncio, aiohttp, mimetypes
 from typing import List
+from uuid import uuid4
 from app.deps import SessionLocal, bot
 from app.notifications import register_ws, unregister_ws, send_to_user_ws
 from datetime import datetime
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
 
 env = Environment(loader=FileSystemLoader("web/templates"))
 router = APIRouter()
@@ -312,48 +313,39 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
 async def upload_admin_file(
     user_id: int = Form(...),
     files: List[UploadFile] = File(...),
+    album: bool = Form(False),
 ):
     os.makedirs("media", exist_ok=True)
     saved_files = []
+    temp_items = []
+
+    def detect_media_type(upload: UploadFile, file_path: str) -> str:
+        mime = upload.content_type or mimetypes.guess_type(upload.filename or "")[0]
+        if not mime:
+            mime = mimetypes.guess_type(file_path)[0]
+
+        if mime and mime.startswith("image/"):
+            return "photo"
+        if mime and mime.startswith("video/"):
+            return "video"
+        if mime and mime.startswith("audio/"):
+            return "voice" if "ogg" in mime else "audio"
+        return "document"
 
     for f in files:
-        file_path = os.path.join("media", f.filename)
+        ext = os.path.splitext(f.filename or "")[1]
+        tmp_name = f"{uuid4().hex}{ext}"
+        file_path = os.path.join("media", tmp_name)
         with open(file_path, "wb") as out:
             out.write(await f.read())
 
-        mime, _ = mimetypes.guess_type(file_path)
-        if mime and mime.startswith("image/"):
-            media_type = "photo"
-        elif mime and mime.startswith("video/"):
-            media_type = "video"
-        elif mime and mime.startswith("audio/"):
-            if "ogg" in mime:
-                media_type = "voice"
-            else:
-                media_type = "audio"
-        else:
-            media_type = "document"
+        media_type = detect_media_type(f, file_path)
+        temp_items.append({
+            "path": file_path,
+            "media_type": media_type,
+        })
 
-        input_file = FSInputFile(file_path)
-        # отправка пользователю
-        if media_type == "photo":
-            sent = await bot.send_photo(user_id, input_file)
-            file_id = sent.photo[-1].file_id
-        elif media_type == "video":
-            sent = await bot.send_video(user_id, input_file)
-            file_id = sent.video.file_id
-        elif media_type == "voice":
-            sent = await bot.send_voice(user_id, input_file)
-            file_id = sent.voice.file_id
-        elif media_type == "audio":
-            sent = await bot.send_audio(user_id, input_file)
-            file_id = sent.audio.file_id
-        else:
-            sent = await bot.send_document(user_id, input_file)
-            file_id = sent.document.file_id
-
-        tg_id = sent.message_id
-
+    async def persist_and_broadcast(media_type: str, file_id: str, tg_id: int):
         async with SessionLocal() as session:
             msg = await save_message(
                 session,
@@ -362,31 +354,131 @@ async def upload_admin_file(
                 text="",
                 tg_message_id=tg_id,
                 media_type=media_type,
-                file_id=file_id,          # ВАЖНО: сохраняем Telegram file_id
+                file_id=file_id,
                 status="delivered",
             )
 
-        await send_to_user_ws(user_id, {
+<<<<<<< ours
+        await send_to_user_ws(
+            user_id,
+            {
+                "action": "message",
+                "from": "admin",
+                "username": config.ADMIN_NAME or "admin",
+                "media_type": media_type,
+                "file_id": file_id,
+                "text": "",
+                "created_at": datetime.utcnow().isoformat(),
+                "id": msg.id,
+                "status": "delivered",
+            },
+        )
+
+        saved_files.append({"id": file_id, "type": media_type})
+=======
+            created_at = (
+                msg.created_at.isoformat()
+                if getattr(msg, "created_at", None) and hasattr(msg.created_at, "isoformat")
+                else datetime.utcnow().isoformat()
+            )
+
+        payload = {
             "action": "message",
             "from": "admin",
             "username": config.ADMIN_NAME or "admin",
             "media_type": media_type,
             "file_id": file_id,
             "text": "",
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": created_at,
             "id": msg.id,
             "status": "delivered",
-        })
+        }
 
-        saved_files.append({
-            "id": file_id,
-            "type": media_type,
-        })
+        await send_to_user_ws(user_id, payload)
+
+        saved_files.append(
+            {
+                "id": file_id,
+                "type": media_type,
+                "msg_id": msg.id,
+                "tg_message_id": tg_id,
+                "created_at": created_at,
+                "status": "delivered",
+            }
+        )
+>>>>>>> theirs
+
+    async def send_single(item):
+        input_file = FSInputFile(item["path"])
+        media_type = item["media_type"]
+
+        if media_type == "photo":
+            sent = await bot.send_photo(user_id, input_file)
+            file_id = sent.photo[-1].file_id if sent.photo else ""
+        elif media_type == "video":
+            sent = await bot.send_video(user_id, input_file)
+            file_id = sent.video.file_id if getattr(sent, "video", None) else ""
+        elif media_type == "voice":
+            sent = await bot.send_voice(user_id, input_file)
+            voice_obj = getattr(sent, "voice", None)
+            file_id = voice_obj.file_id if voice_obj else ""
+        elif media_type == "audio":
+            sent = await bot.send_audio(user_id, input_file)
+            audio_obj = getattr(sent, "audio", None)
+            file_id = audio_obj.file_id if audio_obj else ""
+        else:
+            sent = await bot.send_document(user_id, input_file)
+            doc_obj = getattr(sent, "document", None)
+            file_id = doc_obj.file_id if doc_obj else ""
+
+        await persist_and_broadcast(media_type, file_id, sent.message_id)
 
         try:
-            os.remove(file_path)
+            os.remove(item["path"])
         except OSError:
             pass
+
+    async def send_album_group(chunk):
+        media_inputs = []
+        for entry in chunk:
+            fs_file = FSInputFile(entry["path"])
+            if entry["media_type"] == "photo":
+                media_inputs.append(InputMediaPhoto(media=fs_file))
+            else:
+                media_inputs.append(InputMediaVideo(media=fs_file))
+
+        sent_messages = await bot.send_media_group(user_id, media_inputs)
+        for sent, entry in zip(sent_messages, chunk):
+            if entry["media_type"] == "photo" and sent.photo:
+                file_id = sent.photo[-1].file_id
+            elif entry["media_type"] == "video" and getattr(sent, "video", None):
+                file_id = sent.video.file_id
+            else:
+                file_id = ""
+
+            await persist_and_broadcast(entry["media_type"], file_id, sent.message_id)
+
+            try:
+                os.remove(entry["path"])
+            except OSError:
+                pass
+
+    can_send_album = (
+        album
+        and len(temp_items) > 1
+        and all(item["media_type"] in ("photo", "video") for item in temp_items)
+    )
+
+    if can_send_album:
+        for i in range(0, len(temp_items), 10):
+            chunk = temp_items[i : i + 10]
+            if len(chunk) > 1:
+                await send_album_group(chunk)
+            else:
+                await send_single(chunk[0])
+    else:
+        for item in temp_items:
+            await send_single(item)
 
     return {"ok": True, "files": saved_files}
 
